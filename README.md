@@ -1,0 +1,1 @@
+# Sminchak-Jay-ADS-Programmer-Assessment
