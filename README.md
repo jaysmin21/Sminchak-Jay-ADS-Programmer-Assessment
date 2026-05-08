@@ -80,7 +80,7 @@ install.packages(c("tidyverse", "admiral", "sdtm.oak",
 - Built a Python agent that translates natural-language questions about the AE
   dataset into structured pandas filters via a mocked LLM call.
 - AI assistance was leaned on heavily here to bridge into Python and LLM territory.
-  Implementation was deliberately kept simple.
+  Implementation was deliberately kept simple - mainly used as a learning experience.
 - Architecture follows the spec's Prompt → Parse → Execute flow.
   `mock_llm_response()` is the single swap point for a real LLM call; the rest
   of the pipeline is unchanged when wired to a real API.
