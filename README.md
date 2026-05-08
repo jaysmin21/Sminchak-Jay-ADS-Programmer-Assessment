@@ -60,7 +60,7 @@ install.packages(c("tidyverse", "admiral", "sdtm.oak",
 ### Q2 — ADSL
 - Programmed a full ADSL dataset from the pharmaversesdtm dm, vs, ex, ds, and ae datasets.
 - Utilized admiral pharmaverse package for ADaM dataset creation.
-- Used https://pharmaverse.github.io/admiral/cran-release/articles/adsl.html#death_date as an ADSL mapping in Admiral reference.
+- Used https://pharmaverse.github.io/admiral/cran-release/articles/adsl.html#death_date as an ADSL mapping in Admiral    reference.  Used the reference as ADSL basis, and derived additional variables per the spec's requirements.
 - Heavy use of admiral functions per spec. Required vars (AGEGR9/AGEGR9N,
   TRTSDTM/TRTSTMF, ITTFL, LSTAVLDT) all derived.
 - TRTSTMF: ignore_seconds_flag = TRUE per spec ("if only seconds missing,
