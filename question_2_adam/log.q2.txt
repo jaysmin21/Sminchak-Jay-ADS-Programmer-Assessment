@@ -1,0 +1,385 @@
+> # --------------------------------------------------------------------------------
+> # Genentech: ADS Programmer Coding Assessment
+> # Author: Jay Sminchak
+> # Date: 05/2026
+> # Question 2: ADSL Dataset Creation
+> # --------------------------------------------------------------------------------
+> rm(list = ls()) # Clears the environment to ensure code runs properly from the top
+> 
+> # --------------------------------------------------------------------------------
+> ### Libraries ####
+> # --------------------------------------------------------------------------------
+> library(tidyverse)      # Includes dplyr, tidyr, lubridate, stringr, and ggplot2 packages
+── Attaching core tidyverse packages ──────────────────────────── tidyverse 2.0.0 ──
+✔ dplyr     1.1.4     ✔ readr     2.1.5
+✔ forcats   1.0.1     ✔ stringr   1.5.1
+✔ ggplot2   4.0.1     ✔ tibble    3.3.0
+✔ lubridate 1.9.4     ✔ tidyr     1.3.1
+✔ purrr     1.1.0     
+── Conflicts ────────────────────────────────────────────── tidyverse_conflicts() ──
+✖ dplyr::filter() masks stats::filter()
+✖ dplyr::lag()    masks stats::lag()
+ℹ Use the conflicted package to force all conflicts to become errors
+Warning messages:
+1: package ‘tidyverse’ was built under R version 4.4.3 
+2: package ‘ggplot2’ was built under R version 4.4.3 
+3: package ‘tibble’ was built under R version 4.4.3 
+4: package ‘tidyr’ was built under R version 4.4.3 
+5: package ‘readr’ was built under R version 4.4.3 
+6: package ‘purrr’ was built under R version 4.4.3 
+7: package ‘dplyr’ was built under R version 4.4.3 
+8: package ‘stringr’ was built under R version 4.4.3 
+9: package ‘forcats’ was built under R version 4.4.3 
+10: package ‘lubridate’ was built under R version 4.4.3 
+> library(admiral)        # ADaM mapping package
+Warning message:
+package ‘admiral’ was built under R version 4.4.3 
+> library(pharmaversesdtm)# SDTM domains
+Warning message:
+package ‘pharmaversesdtm’ was built under R version 4.4.3 
+> library(here)           # contributes to export reproduceability, sets project root
+here() starts at C:/Genentech_ADS_Programmer/Sminchak-Jay-ADS-Programmer-Assessment
+Warning message:
+package ‘here’ was built under R version 4.4.3 
+> 
+> # --------------------------------------------------------------------------------
+> ### Reading in the specific domain datasets ####
+> # --------------------------------------------------------------------------------
+> dm <- pharmaversesdtm::dm
+> vs <- pharmaversesdtm::vs
+> ds <- pharmaversesdtm::ds
+> ex <- pharmaversesdtm::ex
+> ae <- pharmaversesdtm::ae
+> 
+> dm <- convert_blanks_to_na(dm)
+> vs <- convert_blanks_to_na(vs)
+> ds <- convert_blanks_to_na(ds)
+> ex <- convert_blanks_to_na(ex)
+> ae <- convert_blanks_to_na(ae)
+> 
+> ### Establishing dm domain as the basis ####
+> adsl <- dm %>%
++   select(-DOMAIN)
+> 
+> ### Deriving treatment variables ####
+> adsl <- adsl %>% 
++   mutate(
++     TRT01P = ARM,
++     TRT01A = ACTARM
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving Treatment Date/Time and Duration ####
+> ## Imputations for completely missing time -> 00:00:00
+> ## Imputations for partially missing time -> "00" in respective category
+> ## no imputation flag for missing SECONDS ONLY
+> ## NOTE: Raw EX data has no time values for any date/time values, expect ALL to be imputed
+> # --------------------------------------------------------------------------------
+> ex_ext <- ex %>%
++   derive_vars_dtm(
++     dtc = EXSTDTC,
++     new_vars_prefix = "EXST",
++     highest_imputation = "h",    # Missing hours, minutes, seconds imputed
++     time_imputation = "00:00:00", # Specified method of imputation
++     ignore_seconds_flag = TRUE # suppresses "S" flag
++       ) %>%
++   derive_vars_dtm(
++     dtc = EXENDTC,
++     new_vars_prefix = "EXEN",
++     time_imputation = "last" # No specific imputation method specified
++   )
+> 
+> adsl <- adsl %>%
++   derive_vars_merged(  # treatment start
++     dataset_add = ex_ext,  # requirements for "Valid Dose" - EXDOSE >= 0, EXTRT contains "PLACEBO"
++     filter_add = (EXDOSE > 0 | 
++              (EXDOSE == 0 & 
++                 str_detect(EXTRT, "PLACEBO"))) & !is.na(EXSTDTM),
++    new_vars = exprs(TRTSDTM = EXSTDTM, TRTSTMF = EXSTTMF),
++    order    = exprs(EXSTDTM, EXSEQ),
++    mode     = "first",
++    by_vars  = exprs(STUDYID, USUBJID)
++   ) %>%
++   derive_vars_merged( # treatment end
++     dataset_add = ex_ext,
++     filter_add  = (EXDOSE > 0 |
++               (EXDOSE == 0 & 
++                  str_detect(EXTRT, "PLACEBO"))) & !is.na(EXENDTM),
++ 
++     new_vars = exprs(TRTEDTM = EXENDTM, TRTETMF = EXENTMF),
++     order    = exprs(EXENDTM, EXSEQ),
++     mode     = "last",
++     by_vars  = exprs(STUDYID, USUBJID)
++   )
+> 
+> 
+> ### TRTSDT / TRTEDT ####
+> adsl <- adsl %>%
++   derive_vars_dtm_to_dt(source_vars = exprs(TRTSDTM, TRTEDTM))
+> 
+> ### TRTDURD ####
+> adsl <- adsl %>%
++   derive_var_trtdurd()  # uses newly created variables
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving EOSDT ####
+> # --------------------------------------------------------------------------------
+> # Extending the DS domain, converting DS.DSSTDTC to numeric
+> ds_ext <- derive_vars_dt(
++   ds,
++   dtc = DSSTDTC,
++   new_vars_prefix = "DSST"
++ )
+> 
+> adsl <- adsl %>%
++   derive_vars_merged(
++     dataset_add = ds_ext,
++     by_vars     = exprs(STUDYID, USUBJID),
++     new_vars    = exprs(EOSDT = DSSTDT),
++     filter_add  = DSCAT == "DISPOSITION EVENT" & DSDECOD != "SCREEN FAILURE"
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving EOSSTT ####
+> # Function formatting the ESSOTT values mapped from the DS.DSDECOD values
+> ## Logic: if DSDECOD -> "COMPLETED, ESSOTT -> "COMPLETED"
+> ##        if DSDECOD -> "SCREEN FAILURE", ESSOTT -> NA (character)
+> ##        if anything else, ESSOTT -> DISCONTINUED
+> # --------------------------------------------------------------------------------
+> format_eosstt <- function(x) {    # Function to sift through values, return proper ESSOTT mappings
++   case_when(
++     x %in% c("COMPLETED")      ~ "COMPLETED",
++     x %in% c("SCREEN FAILURE") ~ NA_character_,
++     TRUE                       ~ "DISCONTINUED"
++   )
++ }
+> 
+> adsl <- adsl %>% 
++   derive_vars_merged(
++     dataset_add    = ds,
++     by_vars        = exprs(STUDYID, USUBJID),
++     filter_add     = DSCAT == "DISPOSITION EVENT",
++     new_vars       = exprs(EOSSTT = format_eosstt(DSDECOD)),
++     missing_values = exprs(EOSSTT = "ONGOING") # If there is no disposition event, status set to ongoing 
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving Disposition Reasons ####
+> # --------------------------------------------------------------------------------
+> adsl <- adsl %>% 
++   derive_vars_merged(
++     dataset_add = ds,
++     by_vars     = exprs(USUBJID),
++     new_vars    = exprs(DCSREAS = DSDECOD, DCSREASP = DSTERM),
++     filter_add  = DSCAT == "DISPOSITION EVENT" & 
++       !(DSDECOD %in% c("SCREEN FAILURE", "COMPLETED", NA)) # filters for all disposition event codings
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving Randomization Date ####
+> # --------------------------------------------------------------------------------
+> adsl <- adsl %>% 
++   derive_vars_merged(
++     dataset_add = ds_ext,
++     filter_add  = DSDECOD == 'RANDOMIZED',
++     by_vars     = exprs(STUDYID, USUBJID),
++     new_vars    = exprs(RANDDT = DSSTDT)
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving Birth Date & Analysis Age ####
+> # --------------------------------------------------------------------------------
+> adsl <- adsl %>%
++   derive_vars_dt(
++     new_vars_prefix = "BRTH",
++     dtc = BRTHDTC
++   ) %>%
++   derive_vars_aage(
++     start_date = BRTHDT, # birthdate
++     end_date   = RANDDT  # randomization date (from pharmavere example)
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving Death Date, Cause and Traceability ####
+> # DTHCAUS:  Cause of death, sourced from EITHER:
+> #             - AE domain where AEOUT == "FATAL"  -> DTHCAUS = AEDECOD
+> #             - DS domain where DSDECOD == "DEATH"
+> #                 AND DSTERM contains "DEATH DUE TO" -> DTHCAUS = DSTERM
+> # Traceability: DTHDOM records the source domain ("AE"/"DS"); DTHSEQ records
+> #               the source --SEQ.
+> # 
+> # --------------------------------------------------------------------------------
+> adsl <- adsl %>%
++   derive_vars_dt(  # death date: DTHDT
++     new_vars_prefix = "DTH",
++     dtc = DTHDTC
++   ) %>%
++   derive_vars_extreme_event(
++     by_vars = exprs(STUDYID, USUBJID),
++     events = list(
++       event(
++         dataset_name  = "ae",
++         condition     = AEOUT == "FATAL",
++         set_values_to = exprs(DTHCAUS = AEDECOD, DTHDOM = "AE", DTHSEQ = AESEQ),
++       ),
++       event(
++         dataset_name  = "ds",
++         condition     = DSDECOD == "DEATH" & grepl("DEATH DUE TO", DSTERM),
++         set_values_to = exprs(DTHCAUS = DSTERM, DTHDOM = "DS", DTHSEQ = DSSEQ),
++       )
++     ),
++     source_datasets  = list(ae = ae, ds = ds),
++     tmp_event_nr_var = event_nr,
++     order            = exprs(event_nr),
++     mode             = "first",            # Prioritizing AE as the record for cause of death
++     new_vars         = exprs(DTHCAUS, DTHDOM, DTHSEQ)
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving Duration Relative to Death ####
+> # --------------------------------------------------------------------------------
+> adsl <- adsl %>%  # Relative day of death
++   derive_vars_duration(
++     new_var    = DTHADY,
++     start_date = TRTSDT,
++     end_date   = DTHDT
++   ) %>% # Days from Death
++   derive_vars_duration(
++     new_var    = LDDTHELD,
++     start_date = TRTEDT,
++     end_date   = DTHDT,
++     add_one    = FALSE
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving Last Known Date Alive + Traceability ####
+> # Conditions:   last complete VS date w/ valid result (VSSTRESN/VSSTRESC not both missing)
+> #               last complete AE onset date (AE.AESTDTC)
+> #               last complete DS disposition date (DS.DSSTDTC)
+> #               last valid treatment date (datepart of ADSL.TRTEDTM)
+> #               MAX of all of these
+> #               LALVSEQ derived from --SEQ variables and LALVDOM maps from SDTM Database for traceability  
+> # --------------------------------------------------------------------------------
+> 
+> # Creating extensions of domain datasets to filter out NA date values
+> # Ensures that LAST value chosen in the sequence is not NA, won't overwrite valid date value
+> ae_ext <- ae %>%
++   derive_vars_dt(dtc = AESTDTC, new_vars_prefix = "AEST", highest_imputation = "n")
+> 
+> vs_ext <- vs %>%
++   derive_vars_dt(dtc = VSDTC, new_vars_prefix = "VS", highest_imputation = "n")
+> 
+> # ds_ext was created in an earlier step (EOSDT)
+> # The "n" highest imputation is the default, already coded in
+> 
+> adsl <- adsl %>%
++   derive_vars_extreme_event(
++     by_vars = exprs(STUDYID, USUBJID),
++     events = list(
++       # Source 1: VS complete date only, valid result required
++       event(
++         dataset_name = "vs_ext",
++         order = exprs(VSDT, VSSEQ),
++         condition = !is.na(VSDT) & !(is.na(VSSTRESN) & is.na(VSSTRESC)),
++         set_values_to = exprs(
++           LSTAVLDT = VSDT,
++           LALVSEQ  = VSSEQ,
++           LALVDOM  = "VS",
++           LALVVAR  = "VSDTC"
++         )
++       ),
++       # Source 2: AE onset date
++       event(
++         dataset_name = "ae_ext",
++         order = exprs(AESTDT, AESEQ),
++         condition = !is.na(AESTDT),
++         set_values_to = exprs(
++           LSTAVLDT = AESTDT,
++           LALVSEQ  = AESEQ,
++           LALVDOM  = "AE",
++           LALVVAR  = "AESTDTC"
++         )
++       ),
++       # Source 3: DS disposition date
++       event(
++         dataset_name = "ds_ext",
++         order = exprs(DSSTDT, DSSEQ),
++         condition = !is.na(DSSTDT),
++         set_values_to = exprs(
++           LSTAVLDT = DSSTDT,
++           LALVSEQ  = DSSEQ,
++           LALVDOM  = "DS",
++           LALVVAR  = "DSSTDTC"
++         )
++       ),
++       # Source 4: datepart of ADSL.TRTEDTM (last valid treatment date)
++       event(
++         dataset_name = "adsl",
++         condition = !is.na(TRTEDT),
++         set_values_to = exprs(
++           LSTAVLDT = TRTEDT,
++           LALVSEQ  = NA_integer_,
++           LALVDOM  = "ADSL",
++           LALVVAR  = "TRTEDTM"
++         )
++       )
++     ),
++     source_datasets = list(
++       vs_ext = vs_ext,
++       ae_ext = ae_ext,
++       ds_ext = ds_ext,
++       adsl   = adsl
++     ),
++     tmp_event_nr_var = event_nr,
++     order   = exprs(LSTAVLDT, LALVSEQ, event_nr),
++     mode    = "last",
++     new_vars = exprs(LSTAVLDT, LALVSEQ, LALVDOM, LALVVAR)
++   )
+> # --------------------------------------------------------------------------------
+> ### Deriving ITTFL flag ####
+> ## Conditions: if DM.ARM is not missing, ITTFL -> Y
+> ##             else, ITTFL -> N
+> ## Utilizing the ADMIRAL package method
+> # --------------------------------------------------------------------------------
+> adsl <- adsl %>% 
++  derive_var_merged_exist_flag(
++     dataset_add = dm,
++     by_vars = exprs(STUDYID, USUBJID),
++     new_var = ITTFL,
++     true_value    = "Y",
++     false_value   = "N",
++     missing_value = "N",
++     condition = !is.na(ARM)
++   )
+> 
+> # --------------------------------------------------------------------------------
+> ### Deriving AGE groupings ####
+> ## Conditions: <18     -> 1
+> ##              18 - 50 (inclusive of both bounds) -> 2 
+> ##             >50     -> 3
+> # AGEGR9/AGEGR9N derived from DM.AGE (not AAGE) per spec
+> # AAGE (analysis age) is derived separately and is not the source here
+> # --------------------------------------------------------------------------------
+> # Age look up tables                 # AGEGR9N in INTEGER (L) form, better for memory
+> agegr9_lookup <- exprs(
++   ~condition,            ~AGEGR9,     ~AGEGR9N,
++   AGE < 18,              "<18",       1L,
++   between(AGE, 18, 50),  "18-50",     2L,
++   AGE > 50,              ">50",       3L,
++   is.na(AGE),            "Missing",   NA_integer_
++ )
+> adsl <- adsl %>%
++   derive_vars_cat(definition = agegr9_lookup)
+> 
+> 
+> # Quick QC checks - one row per subject, the ITTFL flag, caught everything, the AGEGR9N caught everything
+> stopifnot(
++   nrow(adsl) == n_distinct(adsl$USUBJID),     # one row per subject
++   all(adsl$ITTFL %in% c("Y", "N")),
++   all(adsl$AGEGR9N %in% c(1L, 2L, 3L, NA_integer_))
++ )
+> 
+> # --------------------------------------------------------------------------------
+> # Exporting final ADSL dataset
+> # --------------------------------------------------------------------------------
+> write_csv(adsl, here("question_2_adam", "adsl.csv"))
