@@ -63,7 +63,7 @@ ex_ext <- ex %>%
 
 adsl <- adsl %>%
   derive_vars_merged(  # treatment start
-    dataset_add = ex_ext,  # requirements for "Valid Dose" - EXDOSE >= 0, EXTRT contains "PLACEBO"
+    dataset_add = ex_ext,  # requirements for "Valid Dose" - EXDOSE > or = 0, EXTRT contains "PLACEBO"
     filter_add = (EXDOSE > 0 | 
              (EXDOSE == 0 & 
                 str_detect(EXTRT, "PLACEBO"))) & !is.na(EXSTDTM),
